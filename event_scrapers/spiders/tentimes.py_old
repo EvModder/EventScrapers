@@ -1,0 +1,331 @@
+import scrapy
+import logging
+
+import selenium
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+# Set the threshold for selenium to WARNING
+from selenium.webdriver.remote.remote_connection import LOGGER as seleniumLogger
+seleniumLogger.setLevel(logging.WARNING)
+# Set the threshold for urllib3 to WARNING
+from urllib3.connectionpool import log as urllibLogger
+urllibLogger.setLevel(logging.WARNING)
+
+from time import sleep
+
+class EventsSpider(scrapy.Spider):
+    name = "tentimes"
+    # From the homepage: https://10times.com/
+    # "Browse By Category" > "View All"
+
+    start_urls = [
+        'https://10times.com/usa/education-training',
+        'https://10times.com/usa/technology',
+        'https://10times.com/usa/medical-pharma',
+        'https://10times.com/usa/business-consultancy',
+        'https://10times.com/usa/research',
+        'https://10times.com/usa/finance',
+        'https://10times.com/usa/engineering',
+        'https://10times.com/usa/arts-crafts',
+        'https://10times.com/usa/wellness-healthcare',
+        'https://10times.com/usa/food-beverage',
+        'https://10times.com/usa/building-construction',
+        'https://10times.com/usa/entertainment',
+        'https://10times.com/usa/agriculture-forestry',
+        'https://10times.com/usa/power-energy',
+        'https://10times.com/usa/waste-management',
+        'https://10times.com/usa/fashion-beauty',
+        'https://10times.com/usa/logistics-transportation',
+        'https://10times.com/usa/automotive',
+        'https://10times.com/usa/apparel-fashion',
+        'https://10times.com/usa/electronics-electricals',
+        'https://10times.com/usa/home-office',
+        'https://10times.com/usa/security',
+        'https://10times.com/usa/travel-tourism',
+        'https://10times.com/usa/animals-pets',
+        'https://10times.com/usa/baby-kids',
+        'https://10times.com/usa/telecommunication',
+        'https://10times.com/usa/packaging',
+        'https://10times.com/usa/hospitality',
+        'https://10times.com/usa/trade-promotion',
+        'https://10times.com/usa',
+        'https://10times.com/usa/tradeshows',
+        'https://10times.com/usa/conferences',
+        'https://10times.com/usa/workshops',
+
+        'https://10times.com/usa?month=this%20week'
+    ]
+
+    #https://docs.scrapy.org/en/latest/topics/spiders.html#spiderargs
+    def __init__(self, *args, **kwargs):
+      super(EventsSpider, self).__init__(*args, **kwargs)
+      print('in spider.__init__')
+      logging.getLogger('scrapy').propagate = True
+
+      urlindex = getattr(self, 'urlindex', None)
+      if urlindex and urlindex.isdigit():
+        self.start_urls = [ self.start_urls[int(urlindex)] ]
+        print("starturls 1: " + str(self.start_urls))
+
+    # def start_requests(self):
+    #     logging.getLogger('scrapy').propagate = True
+    #     self.log('Starting requests')
+    #     yield scrapy.Request(url='https://10times.com', callback=self.parse)
+
+    # Launch spider for each category url
+    def parse(self, response):
+      print("urls to crawl: " + str(self.start_urls))
+      yield {}
+      options = Options()
+      options.add_argument("disable-infobars")
+      options.add_argument("--disable-notifications")
+      options.add_argument("--incognito")
+      options.add_argument("--disable-extensions")
+      options.add_argument("--disable-gpu")
+      options.add_argument("--disable-infobars")
+      options.add_argument("--disable-web-security")
+      options.add_argument("--no-sandbox")
+      options.add_argument("--headless")
+      options.add_argument("--disable-dev-shm-using")
+      options.add_argument("--disable-setuid-sandbox")
+      self.driver = webdriver.Chrome(options=options)
+
+      for category_url in self.start_urls:
+        event_urls = self.get_event_urls(category_url, response, 2)#setting max=2 for testing
+        print('event urls for category: ' + str(event_urls))
+
+        # get all details for all urls in this aBaseUrl
+        for event_url in event_urls:
+          print("event url to crawl: " + str(event_url))
+          yield scrapy.Request(event_url, callback=self.parse_event)
+
+    # Given an Event Category page url, return individual event urls
+    def get_event_urls(self, category_url, response, max_event_urls_per_category=999999):
+      print('getting event urls for category url: ' + str(category_url))
+      self.driver.get(category_url)
+      last_height = self.driver.execute_script("return document.body.scrollHeight")
+      event_urls = set()
+      while True:
+        next_event_urls = response.xpath('//*[@data-ga-category="Event Listing"]')
+        print('----------\n\n thing:\n'+str(next_event_urls)+'\n\n')
+        for item in next_event_urls:
+            url = item.xpath('@href').extract()[0]
+            if not url or url == '' or url in event_urls:
+              continue
+            print('got event url: ' + str(url))
+            event_urls.add(url)
+            if len(event_urls) >= max_event_urls_per_category:
+              break
+        if len(event_urls) >= max_event_urls_per_category:
+          print("got max event urls from category: " + category_url + "\n... exiting.")
+          break
+
+        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        sleep(20) # scrolling is really slow! wait 2 full minutes for next scroll.
+        new_height = self.driver.execute_script("return document.body.scrollHeight")
+        if (new_height == last_height):
+          print("got all event urls from category: " + category_url + "\n... exiting.")
+          break
+        last_height = new_height
+        print("scrolled to new height: " + str(new_height))
+      # end while loop
+      return event_urls
+
+    # Given HTML for event page, extract relevent data
+    def parse_event(self, response):
+      venue_full_address,venue_state,venue_street_address = self.parse_address(response)
+      start_date,end_date = self.parse_date(response)
+      event_type = self.parse_event_type(response)
+      title,subtitle = self.parse_title(response)
+      venue_name, venue_city, venue_country, venue_lat_long = self.parse_venue(response)
+      description = self.parse_description(response)
+      
+      try:
+        categories = response.xpath('//*[h2="Category & Type"]/parent::*').xpath('.//i//following::a[1]/text()').getall() #array!
+      except:
+        categories = []
+      try:
+        organizer_name = ' '.join(response.xpath('//*[h2="Organizer"]/parent::*').xpath('.//i//following::a[1]/text()').getall())
+      except:
+        organizer_name = ''
+
+      yield {
+        'source_url': response.url,
+        'title': title,
+        'subtitle': subtitle,
+        'venue_name': venue_name,
+        'venue_city': venue_city,
+        'venue_country': venue_country,
+        'venue_state': venue_state,
+        'venue_street_address': venue_street_address,
+        'venue_full_address': venue_full_address,
+        'venue_lat_long': venue_lat_long,
+        'start_date': start_date,
+        'end_date': end_date,
+        'description': description,
+        'categories': categories,
+        'event_type': event_type,
+        'event_url': '', #cant get this from tentimes 
+        'organizer_name': organizer_name
+      }
+
+
+    # Functions to extract different pieces of relevent event data
+
+    def parse_address(self, response):
+      try:
+        venue_full_address = response.css('#map_dirr').xpath('.//span/text()').get()
+        vfa_split = venue_full_address.split(' ')
+        venue_state = vfa_split[-2]
+        venue_street_address = ' '.join(vfa_split[:-3]) # trims last 3 items (city, state, zip) and joins remainder as street addr
+      except:
+        venue_full_address = ''
+        venue_state =  ''
+        venue_street_address = ''
+      return [venue_full_address, venue_state, venue_street_address]
+    
+    def parse_date(self, response):
+      start_date = ''
+      end_date = ''
+      if ((start_date == '') or (end_date == '')):
+        try:
+          start_and_end_dates = response.css('.fa-clock-o').xpath('..').xpath('.//span/@content').getall()
+          if (isinstance(start_and_end_dates, list)):
+            start_date = start_and_end_dates[0]
+          else:
+            start_date = start_and_end_dates
+          start_date = start_date.strip()
+          if (' - ' in start_date):
+            end_date = start_date.split(' - ')[1]
+            start_date = start_date.split(' - ')[0]
+          else:
+            start_date = start_and_end_dates[0] if start_and_end_dates[0] else '';
+            end_date = start_and_end_dates[1] if (len(start_and_end_dates) > 1) else start_date;
+          if (len(start_date) < 3):
+            monthyear = end_date.split(' ')
+            try:
+              start_date = start_date + ' ' + monthyear[1] + ' ' + monthyear[2]
+            except:
+              start_date = end_date
+        except:
+          start_and_end_dates = ''
+          start_date = ''
+          end_date = ''
+
+      if (end_date == ''):
+        end_date = start_date
+
+      if ((start_date == '') or (end_date == '')):
+        try:
+          start_and_end_dates = response.css('.fa-clock').xpath('..').xpath('.//span/text()').getall()
+          print('start_and_end_dates 1 was: ' + str(start_and_end_dates))
+          if (isinstance(start_and_end_dates, list)):
+            start_date = start_and_end_dates[0]
+          else:
+            start_date = start_and_end_dates
+          start_date = start_date.strip()
+          if (' - ' in start_date):
+            end_date = start_date.split(' - ')[1]
+            start_date = start_date.split(' - ')[0]
+          else:
+            end_date = start_date
+          if (len(start_date) < 3):
+            monthyear = end_date.split(' ')
+            try:
+              start_date = start_date + ' ' + monthyear[1] + ' ' + monthyear[2]
+            except:
+              start_date = end_date
+        except:
+          start_and_end_dates = ''
+          start_date = ''
+          end_date = ''
+
+      if (end_date == ''):
+        end_date = start_date
+
+      if ((start_date == '') or (end_date == '')):
+        try:
+          start_and_end_dates = response.css('.fa-clock').xpath('..').xpath('.//span/@content').getall()
+          print('start_and_end_dates 2 was: ' + str(start_and_end_dates))
+          if (isinstance(start_and_end_dates, list)):
+            start_date = start_and_end_dates[0]
+          else:
+            start_date = start_and_end_dates
+          start_date = start_date.strip()
+          if (' - ' in start_date):
+            end_date = start_date.split(' - ')[1]
+            start_date = start_date.split(' - ')[0]
+          else:
+            end_date = start_date
+          if (len(start_date) < 3):
+            monthyear = end_date.split(' ')
+            try:
+              start_date = start_date + ' ' + monthyear[1] + ' ' + monthyear[2]
+            except:
+              start_date = end_date
+        except:
+          start_and_end_dates = ''
+          start_date = ''
+          end_date = ''
+
+      if (end_date == ''):
+        end_date = start_date
+      return [start_date, end_date]
+    
+    def parse_event_type(self, response):
+      try:
+        etype = response.xpath('//*[h2="Category & Type"]').get()
+        event_type = etype.split('</i>')[1].split('<br>')[0].lstrip()  #lstrip() strips leading white. 
+      except:
+        event_type = ''
+      return event_type
+
+    def parse_title(self, response):
+      try:
+        title = response.xpath('//h1/text()').get()
+      except:
+        title = ''
+      try:
+        subtitle = response.css('.desc').xpath('.//strong/text()').get()
+      except:
+        subtitle = ''
+      return [title, subtitle]
+    
+    def parse_venue(self, response):
+      try:
+        venue_name =  response.css('.fa-map-marker').xpath('..').xpath('.//text()').get()
+        venue_city =  response.css('.fa-map-marker').xpath('..').xpath('.//a/text()').get()
+      except:
+        venue_name = ''
+        venue_city = ''
+
+      try:
+        venue_country = response.css('.fa-map-marker').xpath('..').xpath('.//a/text()').getall()[1]
+      except:
+        venue_country = 'USA'
+
+      try:
+        venue_lat_long = response.css('#map_dirr').xpath('.//a').css('.btn').xpath('.//@onclick').get()
+      except:
+        venue_lat_long = ''
+      return venue_name, venue_city, venue_country, venue_lat_long
+
+    def parse_description(self, response):
+      try:
+        description = ' '.join(response.css('.desc').xpath('.//text()').getall())
+      except:
+        description = ''
+
+      if (description == ''):
+        try:
+          description = ' '.join(response.css('.about').xpath('.//text()').getall())
+        except:
+          description = ''
+
+      if (description == ''):
+        try:
+          description = ' '.join(response.css('.main').xpath('.//text()').getall())
+        except:
+          description = ''
+      return description

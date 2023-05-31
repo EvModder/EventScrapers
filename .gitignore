@@ -1,3 +1,4 @@
 event_scrapers/__pycache__
 event_scrapers/spiders/__pycache__
 cleanup.sh
+.scrapy/
