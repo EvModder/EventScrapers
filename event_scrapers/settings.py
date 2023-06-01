@@ -1,8 +1,7 @@
-# Scrapy settings for event_scrapers project
+# Scrapy settings
 #
-# For simplicity, this file contains only settings considered important or
-# commonly used. You can find more settings consulting the documentation:
-#
+# For simplicity, this file contains only settings that are commonly used.
+# You can find more available settings here:
 #     https://docs.scrapy.org/en/latest/topics/settings.html
 #     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 #     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
@@ -12,6 +11,7 @@ BOT_NAME = 'Googlebot'
 SPIDER_MODULES = ['event_scrapers.spiders']
 NEWSPIDER_MODULE = 'event_scrapers.spiders'
 
+LOG_LEVEL = 'INFO'
 
 import logging
 logging.getLogger('scrapy').propagate = False
@@ -28,9 +28,9 @@ ROBOTSTXT_OBEY = False
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
 # See also autothrottle settings and docs
-#DOWNLOAD_DELAY = 3
+DOWNLOAD_DELAY = 15
 # The download delay setting will honor only one of:
-#CONCURRENT_REQUESTS_PER_DOMAIN = 16
+CONCURRENT_REQUESTS_PER_DOMAIN = 8
 #CONCURRENT_REQUESTS_PER_IP = 16
 
 # Disable cookies (enabled by default)
@@ -73,7 +73,7 @@ COOKIES_ENABLED = False
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
 AUTOTHROTTLE_ENABLED = True
 # The initial download delay
-#AUTOTHROTTLE_START_DELAY = 5
+AUTOTHROTTLE_START_DELAY = 5
 # The maximum download delay to be set in case of high latencies
 AUTOTHROTTLE_MAX_DELAY = 60
 # The average number of requests Scrapy should be sending in parallel to
